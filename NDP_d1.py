@@ -33,7 +33,7 @@ st.subheader(header_title)
 header_text = '''
 <p style="font-family:sans-serif; color:Dimgrey; font-size: 12px;">
 Naked Density Project is a PhD research project by <a href="https://github.com/teemuja" target="_blank">Teemu Jama</a> in Aalto University Finland.  
-NDP project studies correllations between land use typologies and <a href="https://sdgs.un.org/goals" target="_blank">SDG-goals</a> by applying latest spatial data analytics and machine learning. \
+NDP project studies correlation between land use typologies and <a href="https://sdgs.un.org/goals" target="_blank">SDG-goals</a> by applying latest spatial data analytics and machine learning. \
 </p>
 '''
 st.markdown(header_text, unsafe_allow_html=True)
