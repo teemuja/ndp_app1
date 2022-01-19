@@ -1,2 +1,2 @@
 # NDP app for OSM data...
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/teemuja/ndp_app2/main/NDP_d1.py)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/teemuja/ndp_app1/main/NDP_d1.py)

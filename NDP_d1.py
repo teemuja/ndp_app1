@@ -1,6 +1,7 @@
 # NDP app 1 boilerplate v0.2 beta a lot
 import pandas as pd
 import geopandas as gpd
+import numpy as np
 import streamlit as st
 import osmnx as ox
 import momepy
@@ -40,19 +41,20 @@ st.markdown(header_text, unsafe_allow_html=True)
 st.markdown("----")
 
 st.title("Data Paper #0.88")
-st.markdown("Density metrics using OSM data")
+st.markdown("**Density measurements using OSM data**")
 st.markdown("###")
 
-add = st.text_input('Type address or place and the city', 'Otakaari 1 espoo')
-#floors = st.slider('Explore the effect of GFA by changing average floor number of buildings near the location', 1, 9, 2, step=1)
-sourceinfo = '<p style="font-family:sans-serif; color:grey; font-size: 9px;">\
-        ...\
-        </p>'
-st.markdown(sourceinfo, unsafe_allow_html=True)
-
+# query
+add = st.text_input('Type address or place', 'Kalamaja Tallinn')
 tags = {"building":True}
 radius = 1000
-gdf = ox.geometries_from_address(add, tags, radius)
+@st.cache(allow_output_mutation=True)
+def get_data(add, tags, radius):
+    gdf = ox.geometries_from_address(add, tags, radius)
+    return gdf
+gdf = get_data(add, tags, radius)
+
+# clean..
 fp_proj = ox.project_gdf(gdf).reset_index()
 fp_poly = fp_proj[fp_proj["element_type"] == "way"]
 fp_poly = fp_poly[["osmid","geometry","building",'building:levels']]
@@ -61,6 +63,49 @@ fp_poly["area"] = fp_poly.area
 fp_poly = fp_poly[fp_poly["area"] > 50]
 # levels numeric
 fp_poly["building:levels"] = pd.to_numeric(fp_poly["building:levels"], errors='coerce', downcast='float')
+# check tessellation input & filter bad ones
+check = momepy.CheckTessellationInput(fp_poly)
+l1 = check.collapse['osmid'].tolist()
+l2 = check.split['osmid'].tolist()
+l3 = check.overlap['osmid'].tolist()
+filterlist = l1 + l2 + l3
+filtered_series = ~fp_poly.osmid.isin(filterlist)
+fp_poly_filtered = fp_poly[filtered_series]
+share = round((len(fp_poly_filtered.index) / len(fp_poly.index))*100,0)
+
+# saving part -------------------
+from github import Github
+from github import InputGitTreeElement
+from datetime import datetime
+
+def save_to_repo(df,placename):
+    def updategitfiles(file_names, file_list, token, Repo, branch, commit_message=""):
+        if commit_message == "":
+            commit_message = "Data Updated - " + datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        g = Github(token)
+        repo = g.get_user().get_repo(Repo)
+        master_ref = repo.get_git_ref("heads/" + branch)
+        master_sha = master_ref.object.sha
+        base_tree = repo.get_git_tree(master_sha)
+        element_list = list()
+        for i in range(0, len(file_list)):
+            element = InputGitTreeElement(file_names[i], '100644', 'blob', file_list[i])
+            element_list.append(element)
+        tree = repo.create_git_tree(element_list, base_tree)
+        parent = repo.get_git_commit(master_sha)
+        commit = repo.create_git_commit(commit_message, tree, [parent])
+        master_ref.edit(commit.sha)
+        print('Update complete')
+    openrepo = "ndp_open_data"
+    branch = "main"
+    github_token = st.secrets['GITHUB_TOKEN']
+    csv1 = df.to_csv(sep=',', index=True)
+    file_list = [csv1]
+    file_names = [f'test_OSM_{placename}.csv']
+    # save summary to open repo
+    updategitfiles(file_names,file_list,github_token,openrepo,branch)
+
+# saving part -------------------------
 
 @st.cache(allow_output_mutation=True)
 def osm_densities(buildings):
@@ -80,8 +125,10 @@ def osm_densities(buildings):
     gdf['GSI'] = round(tess_GSI.series,3)
     # get mean floor num of the neighborhood for possible NaN values
     gdf['ND_mean_floors'] = round(momepy.AverageCharacter(tessellation, values='building:levels', spatial_weights=sw,unique_id='uID').mean,0)
+    gdf['ND_mean_floors'].fillna(1, inplace=True)
+
     # prepare GFAs
-    if gdf["building:levels"] is not None or (gdf["building:levels"] == 0):
+    if gdf["building:levels"] is not None:
         gdf["GFA"] = gdf["area"] * gdf["building:levels"]
     else:
         gdf["GFA"] = gdf["area"] * gdf['ND_mean_floors']
@@ -90,14 +137,17 @@ def osm_densities(buildings):
     gdf['FSI'] = round(gdf['GFA'] / momepy.Area(tessellation).series,3)
     # calculate OSR = open space ratio = spaciousness
     gdf['OSR'] = round((1 - gdf['GSI']) / gdf['FSI'],3)
-    tessellation = tessellation.merge(gdf[['uID','OSR']]) # add OSR values to tess plots for average character..
+    # remove infinite values of osr
+    gdf['OSR'].clip(upper=gdf['OSR'].quantile(0.99), inplace=True)
+    # add OSR values to tess plots for average character..
+    tessellation = tessellation.merge(gdf[['uID','OSR']])
     # add mean OSR of "perceived neighborhood" for each building
     gdf['OSR_ND'] = momepy.AverageCharacter(tessellation, values='OSR', spatial_weights=sw, unique_id='uID').mean
     gdf['OSR_ND'] = round(gdf['OSR_ND'],2)
     #gdf_out = gdf.to_crs(4326)
     return gdf
 
-density_data = osm_densities(fp_poly)
+density_data = osm_densities(fp_poly_filtered).rename(columns={'building:levels':'floors','area':'footprint'})
 
 # cut out edge footprints (incomplete sum values) and viz circle..
 union = fp_poly.to_crs(3857).unary_union
@@ -112,109 +162,128 @@ fp_cut = gpd.overlay(density_data, focus_gdf, how='intersection') # CRS projecte
 # crs back to 4326
 case_data = fp_cut.to_crs(4326)
 
+@st.cache(allow_output_mutation=True)
 def classify_density(density_data):
     density_data['OSR_class'] = 'dense'
     density_data.loc[density_data['OSR'] > 1, 'OSR_class'] = 'compact'
     density_data.loc[density_data['OSR'] > 5, 'OSR_class'] = 'spacious'
-    density_data.loc[density_data['OSR'] > 10, 'OSR_class'] = 'sprawled'
+    density_data.loc[density_data['OSR'] > 10, 'OSR_class'] = 'airy'
     density_data['OSR_ND_class'] = 'dense'
     density_data.loc[density_data['OSR_ND'] > 1, 'OSR_ND_class'] = 'compact'
     density_data.loc[density_data['OSR_ND'] > 5, 'OSR_ND_class'] = 'spacious'
-    density_data.loc[density_data['OSR_ND'] > 10, 'OSR_ND_class'] = 'sprawled'
+    density_data.loc[density_data['OSR_ND'] > 10, 'OSR_ND_class'] = 'airy'
     return density_data
 
 colormap_osr = {
     "dense": "chocolate",
     "compact": "darkgoldenrod",
     "spacious": "darkolivegreen",
-    "sprawled": "cornflowerblue"
+    "airy": "cornflowerblue"
 }
 
-# plot function
-def create_plot(density_data,osr_ve):
-    if osr_ve == 'Plot OSR':
-        @st.cache
-        def plot_with_osr(density_data):
-            fig_dens = px.scatter(density_data, title='Density nomogram',
-                                  x='GSI', y='FSI', color='OSR_class', #size='GFA',
-                                  log_y=False,
-                                  hover_name='building',
-                                  hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                                  labels={"OSR_class": f'{osr_ve}'},
-                                  color_discrete_map=colormap_osr
-                                  )
-            fig_dens.update_layout(legend={'traceorder': 'normal'})
-            fig_dens.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
-            fig_dens.update_xaxes(rangeslider_visible=True)
-            return fig_dens
-        fig_out = plot_with_osr(density_data)
-
-    else:
-        @st.cache
-        def plot_with_osr_nd(density_data):
-            fig_dens = px.scatter(density_data, title='Density nomogram',
-                                  x='GSI', y='FSI', color='OSR_class', #size='GFA',
-                                  log_y=False,
-                                  hover_name='building',
-                                  hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                                  labels={"OSR_class": f'{osr_ve}'},
-                                  color_discrete_map=colormap_osr
-                                  )
-            fig_dens.update_layout(legend={'traceorder': 'normal'})
-            fig_dens.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 2])
-            fig_dens.update_xaxes(rangeslider_visible=True)
-            return fig_dens
-        fig_out = plot_with_osr_nd(density_data)
-    return fig_out
-
 # classify
-density_data = classify_density(case_data)
+case_data = classify_density(case_data)
 
-# plot spot
-plot_spot = st.empty()
+# Density expander...
+with st.expander("Density nomograms", expanded=True):
+    col1, col2 = st.columns(2)
+    plot1 = col1.empty()
+    plot2 = col2.empty()
+    st.write(f'Footprints intact {share} %')
+    # ...check why so may NaNs still in some values
 
-# select plot type
-osr_ve = st.radio("Select scale of OSR", ('Plot OSR', 'Neighborhood OSR'))
+# scatter plots
+#OSR
+fig_OSR = px.scatter(case_data, title='Density nomogram - OSR per plot',
+                                  x='GSI', y='FSI', color='OSR_class', #size='GFA',
+                                  log_y=False,
+                                  hover_name='building',
+                                  hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
+                                  labels={"OSR_class": 'Plot OSR'},
+                                  category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy']},
+                                  color_discrete_map=colormap_osr
+                                  )
+fig_OSR.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
+fig_OSR.update_xaxes(rangeslider_visible=True)
+#OSR_ND
+fig_OSR_ND = px.scatter(case_data, title='Density nomogram - OSR per neighborhood',
+                                  x='GSI', y='FSI', color='OSR_ND_class', #size='GFA',
+                                  log_y=False,
+                                  hover_name='building',
+                                  hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
+                                  labels={"OSR_ND_class": 'Neighborhood OSR'},
+                                  category_orders={'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
+                                  color_discrete_map=colormap_osr
+                                  )
+fig_OSR_ND.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
+fig_OSR_ND.update_xaxes(rangeslider_visible=True)
+#
+plot1.plotly_chart(fig_OSR, use_container_width=True)
+plot2.plotly_chart(fig_OSR_ND, use_container_width=True)
 
-if osr_ve == 'Plot OSR':
-    plot = create_plot(case_data,'Plot OSR')
-    plot_spot.plotly_chart(plot, use_container_width=True)
-else:
-    plot = create_plot(case_data, 'Neighborhood OSR')
-    plot_spot.plotly_chart(plot, use_container_width=True)
 
-
-st.markdown('-------------')
 # map container
 with st.expander("Densities on map", expanded=False):
     map_spot = st.empty()
-    def density_map(plot):
-        if osr_ve == 'Plot OSR':
-            mapcolor = plot['OSR_class']
-        else:
-            mapcolor = plot['OSR_ND_class']
-        lat = plot.unary_union.centroid.y
-        lon = plot.unary_union.centroid.x
-        map = px.choropleth_mapbox(plot,
-                                   geojson=plot.geometry,
-                                   locations=plot.index,
-                                   color=mapcolor,
-                                   hover_name="building",
-                                   hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND','building:levels'],
-                                   mapbox_style="carto-positron",
-                                   labels={'OSR_class': 'Plot OSR','OSR_ND_class': 'Neighborhood OSR'},
-                                   color_discrete_map=colormap_osr,
-                                   center={"lat": lat, "lon": lon},
-                                   zoom=14,
-                                   opacity=0.8,
-                                   width=1200,
-                                   height=700
-                                   )
-        map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=700)
-        return map
-    # plot
+    plot = case_data.copy()
+    lat = plot.unary_union.centroid.y
+    lon = plot.unary_union.centroid.x
+    # map fig1
+    map1 = px.choropleth_mapbox(plot,
+                               geojson=plot.geometry,
+                               locations=plot.index,
+                               color='OSR_class',
+                               hover_name="building",
+                               hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR','floors'],
+                               mapbox_style="carto-positron",
+                               labels={'OSR_class': 'Plot OSR','OSR_ND_class': 'Neighborhood OSR'},
+                               category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy'],
+                                                'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
+                               color_discrete_map=colormap_osr,
+                               center={"lat": lat, "lon": lon},
+                               zoom=14,
+                               opacity=0.8,
+                               width=1200,
+                               height=700
+                               )
+    map1.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=700)
+    # map fig2
+    map2 = px.choropleth_mapbox(plot,
+                                geojson=plot.geometry,
+                                locations=plot.index,
+                                color='OSR_ND_class',
+                                hover_name="building",
+                                hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND', 'floors'],
+                                mapbox_style="carto-positron",
+                                labels={'OSR_class': 'Plot OSR', 'OSR_ND_class': 'Neighborhood OSR'},
+                                category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy'],
+                                                 'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
+                                color_discrete_map=colormap_osr,
+                                center={"lat": lat, "lon": lon},
+                                zoom=14,
+                                opacity=0.8,
+                                width=1200,
+                                height=700
+                                )
+    map2.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=700)
+
+    # select map type
+    osr_ve = st.radio("OSR type for map", ('Plot OSR', 'Neighborhood OSR'))
     with map_spot:
-        st.plotly_chart(density_map(case_data), use_container_width=True)
+        if osr_ve == 'Plot OSR':
+            st.plotly_chart(map1, use_container_width=True)
+        else:
+            st.plotly_chart(map2, use_container_width=True)
+
+    # prepare save..
+    density_data.insert(0, 'TimeStamp', pd.to_datetime('now').replace(microsecond=0))
+    density_data['date'] = density_data['TimeStamp'].dt.date
+    saved_data = density_data.drop(columns=(['uID', 'TimeStamp'])).assign(location=add)
+
+    # save button
+    raks = saved_data.to_csv().encode('utf-8')
+    if st.download_button(label="Save buildings as CSV", data=raks, file_name=f'buildings_{add}.csv',mime='text/csv'):
+        save_to_repo(saved_data.drop(columns='date'),add) # save github without date
 
 # expl container
 with st.expander("What is this?", expanded=False):
@@ -222,41 +291,48 @@ with st.expander("What is this?", expanded=False):
                 ' Meta Berghouser Pont and Per Haupt (2021), Kim Dowey and Elek Pafka (2014) as well as'
                 ' from Finnish seminal work by O-I Meurman in 1947.')
     # describe_table
-    st.markdown('Case data described')
+    st.markdown(f'{add} data described')
     des = case_data.drop(columns=['osmid','uID','ND_mean_floors']).describe()
     st.dataframe(des)
     # expl
     selite = '''
-    GFA = Gross Floor Area = Total area of in-door space in building including all floors<br>
-    FSI = Floor Space Index = FAR = Floor Area Ratio = Ratio of floor area per total area of _morphological plot_<br>
-    GSI = Ground Space Index = Coverage = Ratio of building footprint per total area of _morphological plot_<br>
-    OSR = Open Space Ratio = Ratio of non-build space per square meter of gross floor area<br>
-    OSR_ND = Average OSR of plots in nearby neighborhood<br>
+    **Density measures**<br>
+    **GFA** = Gross Floor Area = Total area of in-door space in building including all floors<br>
+    **FSI** = Floor Space Index = FAR = Floor Area Ratio = Ratio of floor area per total area of _morphological plot_<br>
+    **GSI** = Ground Space Index = Coverage = Ratio of building footprint per total area of _morphological plot_<br>
+    **OSR** = Open Space Ratio = Ratio of non-build space per square meter of gross floor area<br>
+    **OSR_ND** = Average OSR of plots in nearby neighborhood<br>
     
-    <p style="font-family:sans-serif; color:Dimgrey; font-size: 12px;">
     Density classification is based on OSR-values:<br>
-    Dense: OSR < 1, Compact: 1 < OSR < 5, Spacious: 5 < OSR < 10, Sprawled: OSR > 10 <br>
-    **_Morfological plot_** is a plot formed using polygonal tessellation around building. It is an outcome of local zoning sollutions,
-    urban design and transport planning. Calculations are produced using Python library 
-    <a href="http://docs.momepy.org/en/stable/user_guide/elements/tessellation.html" target="_blank">Momepy</a><br>
+    <i>
+    Dense: OSR < 1<br>
+    Compact: 1 < OSR < 5<br>
+    Spacious: 5 < OSR < 10<br>
+    Airy: OSR > 10 <br>
+    </i>
     <br>
-    OSR value with morphological plot classifies the urban density well as it combines both
+    _Morfological plot_ is a plot generated using polygonal tessellation around buildings using 
+    <a href="http://docs.momepy.org/en/stable/user_guide/elements/tessellation.html" target="_blank">Momepy</a>.<br>
+    Nearby neighborhood in OSR_ND calculation is based on queen contiguity for 2 degree neighbours 
+    (border neighbors and their neighbours as an "experienced neighborhood").<br>
+    <br>
+    OSR values of morphological plots classifies the urban density well as it combines both
     the volume of architecture (FSI) and the compactness of urban planning (GSI).
-    </p>
     '''
     soveltaen = '''
     <p style="font-family:sans-serif; color:Dimgrey; font-size: 12px;">
-    References:<br>
+    References:<br><i>
     Berghauser Pont, Meta, and Per Haupt. 2021. Spacematrix: Space, Density and Urban Form. Rotterdam: nai010 publishers.<br>
     Dovey, Kim, Pafka, Elek. 2014. The urban density assemblage: Modelling multiple measures. Urban Des Int 19, 66–76<br>
     Meurman, Otto-I. 1947. Asemakaavaoppi. Helsinki: Rakennuskirja.<br>
     Fleischmann, Martin. 2019. momepy: Urban Morphology Measuring Toolkit. Journal of Open Source Software, 4(43), 1807<br>
+    </i>
     </p>
     '''
     st.markdown(selite, unsafe_allow_html=True)
     cs1, cs2, cs3 = st.columns(3)
     cs1.latex(r'''
-            OSR = r_{t} = \frac {1-GSI} {FSI}
+            OSR = \frac {1-GSI} {FSI}
             ''')  # https://katex.org/docs/supported.html
 
     st.markdown(soveltaen, unsafe_allow_html=True)
@@ -267,3 +343,5 @@ footer_title = '''
 [![MIT license](https://img.shields.io/badge/License-MIT-yellow.svg)](https://lbesson.mit-license.org/) 
 '''
 st.markdown(footer_title)
+
+# vissii
