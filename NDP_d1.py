@@ -1,13 +1,16 @@
-# NDP app 1 boilerplate v0.2 beta a lot
+# NDP app always beta a lot
 import pandas as pd
 import geopandas as gpd
 import numpy as np
+from shapely import wkt
 import streamlit as st
 import osmnx as ox
 import momepy
 import plotly.express as px
+import random
 
-# page setup
+
+# page setup ---------------------------------------------------------------
 st.set_page_config(page_title="NDP App d1", layout="wide")
 padding = 2
 st.markdown(f""" <style>
@@ -19,7 +22,7 @@ st.markdown(f""" <style>
     }} </style> """, unsafe_allow_html=True)
 
 header = '<p style="font-family:sans-serif; color:grey; font-size: 12px;">\
-        NDP project app1 V0.88 "Global Betaman"\
+        NDP project app1 V0.95 "Nordic Betaman"\
         </p>'
 st.markdown(header, unsafe_allow_html=True)
 # plot size setup
@@ -33,47 +36,88 @@ header_title = '''
 st.subheader(header_title)
 header_text = '''
 <p style="font-family:sans-serif; color:Dimgrey; font-size: 12px;">
-Naked Density Project is a PhD research project by <a href="https://github.com/teemuja" target="_blank">Teemu Jama</a> in Aalto University Finland.  
+Naked Density Project is a PhD research project by <a href="https://research.aalto.fi/en/persons/teemu-jama" target="_blank">Teemu Jama</a> in Aalto University Finland.  
 NDP project studies correlation between land use typologies and <a href="https://sdgs.un.org/goals" target="_blank">SDG-goals</a> by applying latest spatial data analytics and machine learning. \
 </p>
 '''
 st.markdown(header_text, unsafe_allow_html=True)
 st.markdown("----")
 
-st.title("Data Paper #0.88")
-st.markdown("**Density measurements using OSM data**")
+st.title("Data Paper #1")
+st.markdown("Density measurements using OSM data")
 st.markdown("###")
+st.title(':point_down:')
 
-# query
-add = st.text_input('Type address or place', 'Kalamaja Tallinn')
-tags = {"building":True}
-radius = 1000
 @st.cache(allow_output_mutation=True)
-def get_data(add, tags, radius):
+def get_data(add, tags, radius=1000):
     gdf = ox.geometries_from_address(add, tags, radius)
-    return gdf
-gdf = get_data(add, tags, radius)
+    fp_proj = ox.project_gdf(gdf).reset_index()
+    fp_proj = fp_proj[fp_proj["element_type"] == "way"]
+    if 'building:levels' in fp_proj:
+        fp_poly = fp_proj[["osmid", "geometry", "building", 'building:levels']]
+    else:
+        fp_proj['building:levels'] = [ random.randint(1,2) for k in fp_proj.index]
+        fp_poly = fp_proj[["osmid", "geometry", "building", 'building:levels']]
+    fp_poly["area"] = fp_poly.area
+    # exclude all small footprints !!!
+    fp_poly = fp_poly[fp_poly["area"] > 50]
+    # levels numeric
+    fp_poly["building:levels"] = pd.to_numeric(fp_poly["building:levels"], errors='coerce', downcast='float')
+    # check tessellation input & filter bad ones
+    check = momepy.CheckTessellationInput(fp_poly)
+    l1 = check.collapse['osmid'].tolist()
+    l2 = check.split['osmid'].tolist()
+    l3 = check.overlap['osmid'].tolist()
+    filterlist = l1 + l2 + l3
+    filtered_series = ~fp_poly.osmid.isin(filterlist)
+    filtered_out = fp_poly[filtered_series]
+    return filtered_out # projected
 
-# clean..
-fp_proj = ox.project_gdf(gdf).reset_index()
-fp_poly = fp_proj[fp_proj["element_type"] == "way"]
-fp_poly = fp_poly[["osmid","geometry","building",'building:levels']]
-fp_poly["area"] = fp_poly.area
-# exclude all small footprints
-fp_poly = fp_poly[fp_poly["area"] > 50]
-# levels numeric
-fp_poly["building:levels"] = pd.to_numeric(fp_poly["building:levels"], errors='coerce', downcast='float')
-# check tessellation input & filter bad ones
-check = momepy.CheckTessellationInput(fp_poly)
-l1 = check.collapse['osmid'].tolist()
-l2 = check.split['osmid'].tolist()
-l3 = check.overlap['osmid'].tolist()
-filterlist = l1 + l2 + l3
-filtered_series = ~fp_poly.osmid.isin(filterlist)
-fp_poly_filtered = fp_poly[filtered_series]
-share = round((len(fp_poly_filtered.index) / len(fp_poly.index))*100,0)
+# USER INPUT -------------------------------------------------------------
+default_list = ['Kalamaja Tallinn','Kreutzberg Berlin','Farsta Stockholm','Welwyn Garden City','Letchworth Garden City']
+#defis = random.choice(default_list)
+add = st.text_input('Type address or place', 'Kalamaja Tallinn')
+tags = {'building': True}
+radius = 900
+buildings = get_data(add, tags, radius)
+# cut out edge footprints (incomplete sum values) and viz circle..
+with st.spinner(text='preparing map...'):
+    union = buildings.unary_union
+    env = union.envelope
+    focus = gpd.GeoSeries(env)
+    focus_area = gpd.GeoSeries(focus)
+    focus_circle = focus_area.centroid.buffer(radius)
+    focus_gdf = gpd.GeoDataFrame(focus_circle, geometry=0)
+    fp_cut = gpd.overlay(buildings, focus_gdf, how='intersection')  # CRS projected for both
 
-# saving part -------------------
+with st.expander("Buildings on map", expanded=True):
+    plot = fp_cut.to_crs(4326)
+    lat = plot.unary_union.centroid.y
+    lon = plot.unary_union.centroid.x
+    mymap = px.choropleth_mapbox(plot,
+                                 geojson=plot.geometry,
+                                 locations=plot.index,
+                                 #title='Buildings',
+                                 color="building",
+                                 hover_name='building',
+                                 hover_data=['building:levels'],
+                                 mapbox_style="carto-positron",
+                                 #color_discrete_map=colormap_osm,
+                                 color_discrete_sequence=px.colors.qualitative.D3,
+                                 center={"lat": lat, "lon": lon},
+                                 zoom=13,
+                                 opacity=0.8,
+                                 width=1200,
+                                 height=700
+                                 )
+    st.plotly_chart(mymap, use_container_width=True)
+    flr_rate = round((buildings['building:levels'].isna().sum() / len(buildings.index)) * 100,0)
+    st.caption(f'Floor number information in {flr_rate}% of buildings. The rest will be estimated using nearby averages.')
+
+# -------------------------------------------------------------------
+
+
+# saving function -------------------
 from github import Github
 from github import InputGitTreeElement
 from datetime import datetime
@@ -105,8 +149,7 @@ def save_to_repo(df,placename):
     # save summary to open repo
     updategitfiles(file_names,file_list,github_token,openrepo,branch)
 
-# saving part -------------------------
-
+# @st.experimental_memo #https://docs.streamlit.io/library/api-reference/performance/st.experimental_memo
 @st.cache(allow_output_mutation=True)
 def osm_densities(buildings):
     # projected crs for momepy calculations
@@ -144,23 +187,9 @@ def osm_densities(buildings):
     # add mean OSR of "perceived neighborhood" for each building
     gdf['OSR_ND'] = momepy.AverageCharacter(tessellation, values='OSR', spatial_weights=sw, unique_id='uID').mean
     gdf['OSR_ND'] = round(gdf['OSR_ND'],2)
+    gdf.rename(columns={'building:levels': 'floors', 'area': 'footprint'},inplace=True)
     #gdf_out = gdf.to_crs(4326)
     return gdf
-
-density_data = osm_densities(fp_poly_filtered).rename(columns={'building:levels':'floors','area':'footprint'})
-
-# cut out edge footprints (incomplete sum values) and viz circle..
-union = fp_poly.to_crs(3857).unary_union
-env = union.envelope
-focus = gpd.GeoSeries(env)
-focus_area = gpd.GeoSeries(focus)
-focus_circle = focus_area.centroid.buffer(radius)
-
-focus_gdf = gpd.GeoDataFrame(focus_circle, geometry=0)
-fp_cut = gpd.overlay(density_data, focus_gdf, how='intersection') # CRS projected for both
-
-# crs back to 4326
-case_data = fp_cut.to_crs(4326)
 
 @st.cache(allow_output_mutation=True)
 def classify_density(density_data):
@@ -181,99 +210,88 @@ colormap_osr = {
     "airy": "cornflowerblue"
 }
 
-# classify
-case_data = classify_density(case_data)
+# CALCULATE DENSITIES ----------------------------------
+
+st.markdown('###')
+m = st.markdown("""
+<style>
+div.stButton > button:first-child {
+    background-color: #fab43a;
+    color:#ffffff;
+}
+div.stButton > button:hover {
+    background-color: #e75d35; 
+    color:#ffffff;
+    }
+</style>""", unsafe_allow_html=True)
+run = st.button(f'Calculate densitites for {add}')
+
+if run:
+    density_data = osm_densities(buildings)
+    case_data = classify_density(density_data)
+else:
+    st.stop()
 
 # Density expander...
 with st.expander("Density nomograms", expanded=True):
+    #OSR
+    fig_OSR = px.scatter(case_data, title='Density nomogram - OSR per plot',
+                                      x='GSI', y='FSI', color='OSR_class', #size='GFA',
+                                      log_y=False,
+                                      hover_name='building',
+                                      hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
+                                      labels={"OSR_class": 'Plot OSR'},
+                                      category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy']},
+                                      color_discrete_map=colormap_osr
+                                      )
+    fig_OSR.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
+    fig_OSR.update_xaxes(rangeslider_visible=True)
+
+    #OSR_ND
+    fig_OSR_ND = px.scatter(case_data, title='Density nomogram - OSR per neighborhood',
+                                      x='GSI', y='FSI', color='OSR_ND_class', #size='GFA',
+                                      log_y=False,
+                                      hover_name='building',
+                                      hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
+                                      labels={"OSR_ND_class": 'Neighborhood OSR'},
+                                      category_orders={'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
+                                      color_discrete_map=colormap_osr
+                                      )
+    fig_OSR_ND.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
+    fig_OSR_ND.update_xaxes(rangeslider_visible=True)
+
+    # and maps..
+    case_data_map = case_data.to_crs(4326)
+    map_OSR = px.choropleth(case_data_map,
+                            title='Density structure - OSR',
+                            geojson=case_data_map.geometry,
+                            locations=case_data_map.index,
+                            color="OSR_class",
+                            hover_data=['floors', 'GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
+                            color_discrete_map=colormap_osr,
+                            category_orders={'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
+                            projection="mercator")
+    map_OSR.update_geos(fitbounds="locations", visible=False)
+    map_OSR.update_layout(showlegend=False) #margin={"r":0,"t":0,"l":0,"b":0},
+
+    map_OSR_ND = px.choropleth(case_data_map,
+                            title='Density structure - OSR_ND',
+                            geojson=case_data_map.geometry,
+                            locations=case_data_map.index,
+                            color="OSR_ND_class",
+                            hover_data=['floors', 'GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
+                            color_discrete_map=colormap_osr,
+                            category_orders={'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
+                            projection="mercator")
+    map_OSR_ND.update_geos(fitbounds="locations", visible=False)
+    map_OSR_ND.update_layout(showlegend=False)
+
+    # charts..
     col1, col2 = st.columns(2)
-    plot1 = col1.empty()
-    plot2 = col2.empty()
-    st.write(f'Footprints intact {share} %')
-    # ...check why so may NaNs still in some values
-
-# scatter plots
-#OSR
-fig_OSR = px.scatter(case_data, title='Density nomogram - OSR per plot',
-                                  x='GSI', y='FSI', color='OSR_class', #size='GFA',
-                                  log_y=False,
-                                  hover_name='building',
-                                  hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                                  labels={"OSR_class": 'Plot OSR'},
-                                  category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy']},
-                                  color_discrete_map=colormap_osr
-                                  )
-fig_OSR.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
-fig_OSR.update_xaxes(rangeslider_visible=True)
-#OSR_ND
-fig_OSR_ND = px.scatter(case_data, title='Density nomogram - OSR per neighborhood',
-                                  x='GSI', y='FSI', color='OSR_ND_class', #size='GFA',
-                                  log_y=False,
-                                  hover_name='building',
-                                  hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                                  labels={"OSR_ND_class": 'Neighborhood OSR'},
-                                  category_orders={'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
-                                  color_discrete_map=colormap_osr
-                                  )
-fig_OSR_ND.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
-fig_OSR_ND.update_xaxes(rangeslider_visible=True)
-#
-plot1.plotly_chart(fig_OSR, use_container_width=True)
-plot2.plotly_chart(fig_OSR_ND, use_container_width=True)
-
-
-# map container
-with st.expander("Densities on map", expanded=False):
-    map_spot = st.empty()
-    plot = case_data.copy()
-    lat = plot.unary_union.centroid.y
-    lon = plot.unary_union.centroid.x
-    # map fig1
-    map1 = px.choropleth_mapbox(plot,
-                               geojson=plot.geometry,
-                               locations=plot.index,
-                               color='OSR_class',
-                               hover_name="building",
-                               hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR','floors'],
-                               mapbox_style="carto-positron",
-                               labels={'OSR_class': 'Plot OSR','OSR_ND_class': 'Neighborhood OSR'},
-                               category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy'],
-                                                'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
-                               color_discrete_map=colormap_osr,
-                               center={"lat": lat, "lon": lon},
-                               zoom=14,
-                               opacity=0.8,
-                               width=1200,
-                               height=700
-                               )
-    map1.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=700)
-    # map fig2
-    map2 = px.choropleth_mapbox(plot,
-                                geojson=plot.geometry,
-                                locations=plot.index,
-                                color='OSR_ND_class',
-                                hover_name="building",
-                                hover_data=['GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND', 'floors'],
-                                mapbox_style="carto-positron",
-                                labels={'OSR_class': 'Plot OSR', 'OSR_ND_class': 'Neighborhood OSR'},
-                                category_orders={'OSR_class': ['dense', 'compact', 'spacious', 'airy'],
-                                                 'OSR_ND_class': ['dense', 'compact', 'spacious', 'airy']},
-                                color_discrete_map=colormap_osr,
-                                center={"lat": lat, "lon": lon},
-                                zoom=14,
-                                opacity=0.8,
-                                width=1200,
-                                height=700
-                                )
-    map2.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=700)
-
-    # select map type
-    osr_ve = st.radio("OSR type for map", ('Plot OSR', 'Neighborhood OSR'))
-    with map_spot:
-        if osr_ve == 'Plot OSR':
-            st.plotly_chart(map1, use_container_width=True)
-        else:
-            st.plotly_chart(map2, use_container_width=True)
+    col1.plotly_chart(fig_OSR, use_container_width=True)
+    col1.plotly_chart(map_OSR, use_container_width=True)
+    col2.plotly_chart(fig_OSR_ND, use_container_width=True)
+    col2.plotly_chart(map_OSR_ND, use_container_width=True)
 
     # prepare save..
     density_data.insert(0, 'TimeStamp', pd.to_datetime('now').replace(microsecond=0))
@@ -282,8 +300,9 @@ with st.expander("Densities on map", expanded=False):
 
     # save button
     raks = saved_data.to_csv().encode('utf-8')
-    if st.download_button(label="Save buildings as CSV", data=raks, file_name=f'buildings_{add}.csv',mime='text/csv'):
-        save_to_repo(saved_data.drop(columns='date'),add) # save github without date
+    if st.download_button(label="Save density data as CSV", data=raks, file_name=f'buildings_{add}.csv',mime='text/csv'):
+        save_to_repo(saved_data,add) # save github without date
+        st.stop()
 
 # expl container
 with st.expander("What is this?", expanded=False):
