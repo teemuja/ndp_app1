@@ -37,7 +37,7 @@ st.subheader(header_title)
 header_text = '''
 <p style="font-family:sans-serif; color:Dimgrey; font-size: 12px;">
 Naked Density Project is a PhD research project by <a href="https://research.aalto.fi/en/persons/teemu-jama" target="_blank">Teemu Jama</a> in Aalto University Finland.  
-NDP project studies correlation between land use typologies and <a href="https://sdgs.un.org/goals" target="_blank">SDG-goals</a> by applying latest spatial data analytics and machine learning. \
+NDP project studies correlation between urban density and <a href="https://sdgs.un.org/goals" target="_blank">SDG-goals</a> by applying latest spatial data analytics and machine learning. \
 </p>
 '''
 st.markdown(header_text, unsafe_allow_html=True)
@@ -248,7 +248,7 @@ with st.expander("Density nomograms", expanded=True):
     fig_OSR.update_xaxes(rangeslider_visible=True)
 
     #OSR_ND
-    fig_OSR_ND = px.scatter(case_data, title='Density nomogram - OSR per neighborhood',
+    fig_OSR_ND = px.scatter(case_data, title='Density nomogram - OSR of neighborhood',
                                       x='GSI', y='FSI', color='OSR_ND_class', #size='GFA',
                                       log_y=False,
                                       hover_name='building',
@@ -335,7 +335,7 @@ with st.expander("What is this?", expanded=False):
     Nearby neighborhood in OSR_ND calculation is based on queen contiguity for 2 degree neighbours 
     (border neighbors and their neighbours as an "experienced neighborhood").<br>
     <br>
-    OSR values of morphological plots classifies the urban density well as it combines both
+    Average OSR values of morphological plots classify urban density well as they combine both
     the volume of architecture (FSI) and the compactness of urban planning (GSI).
     '''
     soveltaen = '''
