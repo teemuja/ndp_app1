@@ -7,6 +7,7 @@ import streamlit as st
 import osmnx as ox
 import momepy
 import plotly.express as px
+px.set_mapbox_access_token(st.secrets['MAPBOX_TOKEN'])
 import random
 
 
@@ -22,7 +23,7 @@ st.markdown(f""" <style>
     }} </style> """, unsafe_allow_html=True)
 
 header = '<p style="font-family:sans-serif; color:grey; font-size: 12px;">\
-        NDP project app1 V0.95 "Nordic Betaman"\
+        NDP project app1 V0.95 "Nordic Beta"\
         </p>'
 st.markdown(header, unsafe_allow_html=True)
 # plot size setup
@@ -44,7 +45,7 @@ st.markdown(header_text, unsafe_allow_html=True)
 st.markdown("----")
 
 st.title("Data Paper #1")
-st.markdown("Density measurements using OSM data")
+st.markdown("Density measurements using Open Street Map data")
 st.markdown("###")
 st.title(':point_down:')
 
@@ -101,8 +102,8 @@ with st.expander("Buildings on map", expanded=True):
                                  color="building",
                                  hover_name='building',
                                  hover_data=['building:levels'],
-                                 mapbox_style="carto-positron",
-                                 #color_discrete_map=colormap_osm,
+                                 labels={"building": 'Building tags in use'},
+                                 mapbox_style="mapbox://styles/teemuja/ckyv86av3002q14n1sz90gxa7",
                                  color_discrete_sequence=px.colors.qualitative.D3,
                                  center={"lat": lat, "lon": lon},
                                  zoom=13,
@@ -197,13 +198,13 @@ def classify_density(density_data):
     density_data.loc[density_data['OSR'] > 2, 'OSR_class'] = 'compact'
     density_data.loc[density_data['OSR'] > 4, 'OSR_class'] = 'spacious'
     density_data.loc[density_data['OSR'] > 8, 'OSR_class'] = 'airy'
-    density_data.loc[density_data['OSR'] > 16, 'OSR_class'] = 'splay'
+    density_data.loc[density_data['OSR'] > 16, 'OSR_class'] = 'spread'
     density_data['OSR_ND_class'] = 'close'
     density_data.loc[density_data['OSR_ND'] > 1, 'OSR_ND_class'] = 'dense'
     density_data.loc[density_data['OSR_ND'] > 2, 'OSR_ND_class'] = 'compact'
     density_data.loc[density_data['OSR_ND'] > 4, 'OSR_ND_class'] = 'spacious'
     density_data.loc[density_data['OSR_ND'] > 8, 'OSR_ND_class'] = 'airy'
-    density_data.loc[density_data['OSR_ND'] > 16, 'OSR_ND_class'] = 'splay'
+    density_data.loc[density_data['OSR_ND'] > 16, 'OSR_ND_class'] = 'spread'
     return density_data
 
 colormap_osr = {
@@ -212,7 +213,7 @@ colormap_osr = {
     "compact": "darkolivegreen",
     "spacious": "lightgreen",
     "airy": "cornflowerblue",
-    "splay": "lightblue"
+    "spread": "lightblue"
 }
 # CALCULATE DENSITIES ----------------------------------
 
@@ -244,8 +245,8 @@ with st.expander("Density nomograms", expanded=True):
                                       log_y=False,
                                       hover_name='building',
                                       hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                                      labels={"OSR_class": 'Plot OSR'},
-                                      category_orders={'OSR_class': ['close','dense','compact','spacious','airy','splay']},
+                                      #labels={"OSR_class": 'Plot OSR class'},
+                                      category_orders={'OSR_class': ['close','dense','compact','spacious','airy','spread']},
                                       color_discrete_map=colormap_osr
                                       )
     fig_OSR.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
@@ -257,8 +258,8 @@ with st.expander("Density nomograms", expanded=True):
                                       log_y=False,
                                       hover_name='building',
                                       hover_data=['floors','GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                                      labels={"OSR_ND_class": 'Neighborhood OSR'},
-                                      category_orders={'OSR_ND_class': ['close','dense','compact','spacious','airy','splay']},
+                                      #labels={"OSR_ND_class": 'Neighborhood OSR class'},
+                                      category_orders={'OSR_ND_class': ['close','dense','compact','spacious','airy','spread']},
                                       color_discrete_map=colormap_osr
                                       )
     fig_OSR_ND.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
@@ -272,9 +273,10 @@ with st.expander("Density nomograms", expanded=True):
                             locations=case_data_map.index,
                             color="OSR_class",
                             labels={"OSR_class": 'Plot OSR'},
+                            hover_name='building',
                             hover_data=['floors', 'GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
                             color_discrete_map=colormap_osr,
-                            category_orders={'OSR_class': ['close','dense','compact','spacious','airy','splay']},
+                            category_orders={'OSR_class': ['close','dense','compact','spacious','airy','spread']},
                             projection="mercator")
     map_OSR.update_geos(fitbounds="locations", visible=False)
     map_OSR.update_layout(showlegend=True) #margin={"r":0,"t":0,"l":0,"b":0},
@@ -285,9 +287,10 @@ with st.expander("Density nomograms", expanded=True):
                             locations=case_data_map.index,
                             color="OSR_ND_class",
                             labels={"OSR_ND_class": 'Neighborhood OSR'},
+                            hover_name='building',
                             hover_data=['floors', 'GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
                             color_discrete_map=colormap_osr,
-                            category_orders={'OSR_ND_class': ['close','dense','compact','spacious','airy','splay']},
+                            category_orders={'OSR_ND_class': ['close','dense','compact','spacious','airy','spread']},
                             projection="mercator")
     map_OSR_ND.update_geos(fitbounds="locations", visible=False)
     map_OSR_ND.update_layout(showlegend=True)
@@ -335,7 +338,7 @@ with st.expander("What is this?", expanded=False):
     Compact: OSR 2-4 <br>
     Spacious: OSR 4-8 <br>
     Airy: OSR 8-16 <br>
-    Splay: OSR > 16 <br>
+    Spread: OSR > 16 <br>
     </i>
     <br>
     _Morfological plot_ is a plot generated using polygonal tessellation around buildings using 
