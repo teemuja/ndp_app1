@@ -2,7 +2,6 @@
 import pandas as pd
 import geopandas as gpd
 import numpy as np
-from shapely import wkt
 import streamlit as st
 import osmnx as ox
 import momepy
@@ -77,10 +76,17 @@ def get_data(add, tags, radius=1000):
 # USER INPUT -------------------------------------------------------------
 default_list = ['Kalamaja Tallinn','Kreutzberg Berlin','Farsta Stockholm','Welwyn Garden City','Letchworth Garden City']
 #defis = random.choice(default_list)
-add = st.text_input('Type address or place', 'Kalamaja Tallinn')
+add = st.text_input('Type address or place on earth')
 tags = {'building': True}
 radius = 900
-buildings = get_data(add, tags, radius)
+if add:
+    try:
+        buildings = get_data(add, tags, radius)
+    except:
+        st.write('Check the address!')
+else:
+    st.stop()
+
 # cut out edge footprints (incomplete sum values) and viz circle..
 with st.spinner(text='preparing map...'):
     union = buildings.unary_union
@@ -116,39 +122,6 @@ with st.expander("Buildings on map", expanded=True):
     st.caption(f'Floor number information in {flr_rate}% of buildings. The rest will be estimated using nearby averages.')
 
 # -------------------------------------------------------------------
-
-
-# saving function -------------------
-from github import Github
-from github import InputGitTreeElement
-from datetime import datetime
-
-def save_to_repo(df,placename):
-    def updategitfiles(file_names, file_list, token, Repo, branch, commit_message=""):
-        if commit_message == "":
-            commit_message = "Data Updated - " + datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        g = Github(token)
-        repo = g.get_user().get_repo(Repo)
-        master_ref = repo.get_git_ref("heads/" + branch)
-        master_sha = master_ref.object.sha
-        base_tree = repo.get_git_tree(master_sha)
-        element_list = list()
-        for i in range(0, len(file_list)):
-            element = InputGitTreeElement(file_names[i], '100644', 'blob', file_list[i])
-            element_list.append(element)
-        tree = repo.create_git_tree(element_list, base_tree)
-        parent = repo.get_git_commit(master_sha)
-        commit = repo.create_git_commit(commit_message, tree, [parent])
-        master_ref.edit(commit.sha)
-        print('Update complete')
-    openrepo = "ndp_open_data"
-    branch = "main"
-    github_token = st.secrets['GITHUB_TOKEN']
-    csv1 = df.to_csv(sep=',', index=True)
-    file_list = [csv1]
-    file_names = [f'test_OSM_{placename}.csv']
-    # save summary to open repo
-    updategitfiles(file_names,file_list,github_token,openrepo,branch)
 
 # @st.experimental_memo #https://docs.streamlit.io/library/api-reference/performance/st.experimental_memo
 @st.cache(allow_output_mutation=True)
@@ -305,13 +278,22 @@ with st.expander("Density nomograms", expanded=True):
     # prepare save..
     density_data.insert(0, 'TimeStamp', pd.to_datetime('now').replace(microsecond=0))
     density_data['date'] = density_data['TimeStamp'].dt.date
-    saved_data = density_data.drop(columns=(['uID', 'TimeStamp'])).assign(location=add)
+    save_me = density_data.drop(columns=(['uID', 'TimeStamp','OSR_class','OSR_ND_class'])).assign(location=add).fillna(0)
+    save_me = save_me.assign(flr_rate=flr_rate)
 
-    # save button
-    raks = saved_data.to_csv().encode('utf-8')
-    if st.download_button(label="Save density data as CSV", data=raks, file_name=f'buildings_{add}.csv',mime='text/csv'):
-        save_to_repo(saved_data,add) # save github without date
-        st.stop()
+    # save button -----------------------------------------------------------------------
+    raks = save_me.to_csv().encode('utf-8')
+    save = st.download_button(label="Save density data as CSV", data=raks, file_name=f'buildings_{add}.csv',mime='text/csv')
+
+    # secret save -----------------------------------------------------------------------
+    from io import StringIO
+    import boto3
+    bucket = 'ndpproject' #s3://ndpproject/ndp1/
+    csv_buffer = StringIO()
+    save_me.to_csv(csv_buffer)
+    s3_resource = boto3.resource('s3')
+    s3_resource.Object(bucket, f'ndp1/D1_{add}.csv').put(Body=csv_buffer.getvalue())
+
 
 # expl container
 with st.expander("What is this?", expanded=False):

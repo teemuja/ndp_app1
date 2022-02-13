@@ -6,4 +6,5 @@ osmnx
 momepy
 plotly
 Rtree
-PyGithub
+boto3
+
