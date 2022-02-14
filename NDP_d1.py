@@ -288,11 +288,15 @@ with st.expander("Density nomograms", expanded=True):
     # secret save -----------------------------------------------------------------------
     from io import StringIO
     import boto3
-    bucket = 'ndpproject' #s3://ndpproject/ndp1/
+    from botocore.exceptions import ClientError
+    bucket = 'ndpproject'
     csv_buffer = StringIO()
     save_me.to_csv(csv_buffer)
     s3_resource = boto3.resource('s3')
-    s3_resource.Object(bucket, f'ndp1/D1_{add}.csv').put(Body=csv_buffer.getvalue())
+    try:
+        s3_resource.Object(bucket, f'ndp1/D1_{add}.csv').load()
+    except ClientError as e:
+        s3_resource.Object(bucket, f'ndp1/D1_{add}.csv').put(Body=csv_buffer.getvalue())
 
 
 # expl container
