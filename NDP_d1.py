@@ -7,6 +7,7 @@ import osmnx as ox
 import momepy
 import plotly.express as px
 px.set_mapbox_access_token(st.secrets['MAPBOX_TOKEN'])
+my_style = st.secrets['MAPBOX_STYLE']
 import random
 
 
@@ -74,9 +75,9 @@ def get_data(add, tags, radius=1000):
     return filtered_out # projected
 
 # USER INPUT -------------------------------------------------------------
-default_list = ['Kalamaja Tallinn','Kreutzberg Berlin','Farsta Stockholm','Welwyn Garden City','Letchworth Garden City']
-#defis = random.choice(default_list)
-add = st.text_input('Type address or place on earth')
+user_input = st.text_input('Type address or place on earth')
+import re
+add = re.sub(' +', ' ', f'{user_input}')
 tags = {'building': True}
 radius = 900
 if add:
@@ -84,6 +85,7 @@ if add:
         buildings = get_data(add, tags, radius)
     except:
         st.write('Check the address!')
+        st.stop()
 else:
     st.stop()
 
@@ -109,7 +111,7 @@ with st.expander("Buildings on map", expanded=True):
                                  hover_name='building',
                                  hover_data=['building:levels'],
                                  labels={"building": 'Building tags in use'},
-                                 mapbox_style="mapbox://styles/teemuja/ckyv86av3002q14n1sz90gxa7",
+                                 mapbox_style=my_style,
                                  color_discrete_sequence=px.colors.qualitative.D3,
                                  center={"lat": lat, "lon": lon},
                                  zoom=13,
@@ -124,7 +126,7 @@ with st.expander("Buildings on map", expanded=True):
 # -------------------------------------------------------------------
 
 # @st.experimental_memo #https://docs.streamlit.io/library/api-reference/performance/st.experimental_memo
-@st.cache(allow_output_mutation=True)
+#@st.cache(allow_output_mutation=True)
 def osm_densities(buildings):
     # projected crs for momepy calculations
     gdf = buildings.to_crs(3857)
@@ -342,6 +344,7 @@ with st.expander("What is this?", expanded=False):
     Dovey, Kim, Pafka, Elek. 2014. The urban density assemblage: Modelling multiple measures. Urban Des Int 19, 66–76<br>
     Meurman, Otto-I. 1947. Asemakaavaoppi. Helsinki: Rakennuskirja.<br>
     Fleischmann, Martin. 2019. momepy: Urban Morphology Measuring Toolkit. Journal of Open Source Software, 4(43), 1807<br>
+    Boeing, G. 2017. “OSMnx: New Methods for Acquiring, Constructing, Analyzing, and Visualizing Complex Street Networks.” Computers, Environment and Urban Systems. 65, 126-139.<br>
     </i>
     </p>
     '''
