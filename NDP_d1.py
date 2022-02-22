@@ -32,7 +32,7 @@ px.defaults.height = 700
 
 # page title
 header_title = '''
-:see_no_evil: **Naked Density Project**
+**Naked Density Project**
 '''
 st.subheader(header_title)
 header_text = '''
@@ -45,7 +45,7 @@ st.markdown(header_text, unsafe_allow_html=True)
 st.markdown("----")
 
 st.title("Data Paper #1")
-st.markdown("Density measurements using Open Street Map data")
+st.markdown("Density measurement tests using Open Street Map data")
 st.markdown("###")
 st.title(':point_down:')
 
@@ -155,13 +155,24 @@ def osm_densities(buildings):
     gdf['FSI'] = round(gdf['GFA'] / momepy.Area(tessellation).series,3)
     # calculate OSR = open space ratio = spaciousness
     gdf['OSR'] = round((1 - gdf['GSI']) / gdf['FSI'],3)
+
+    # ND calculations
+    # queen contiguity for 2 degree neighbours = "perceived neighborhood"
+    tessellation = tessellation.merge(
+        gdf[['uID', 'area', 'GFA', 'OSR']])  # add selected values from buildings to tess-areas
+    sw = momepy.sw_high(k=2, gdf=tessellation, ids='uID')  # degree of nd
+    gdf['GSI_ND'] = round(
+        momepy.Density(tessellation, values='area', spatial_weights=sw, unique_id='uID').series, 2)
+    gdf['FSI_ND'] = round(momepy.Density(tessellation, values='GFA', spatial_weights=sw, unique_id='uID').series,
+                          2)
+    gdf['OSR_ND'] = round((1 - gdf['GSI_ND']) / gdf['FSI_ND'], 2)
+    gdf['OSR_ND_mean'] = round(
+        momepy.AverageCharacter(tessellation, values='OSR', spatial_weights=sw, unique_id='uID').mean, 2)
+    # remove infinite values of osr if needed..
+    gdf['OSR_ND'].clip(upper=gdf['OSR'].quantile(0.99), inplace=True)
+    gdf['OSR_ND_mean'].clip(upper=gdf['OSR'].quantile(0.99), inplace=True)
     # remove infinite values of osr
     gdf['OSR'].clip(upper=gdf['OSR'].quantile(0.99), inplace=True)
-    # add OSR values to tess plots for average character..
-    tessellation = tessellation.merge(gdf[['uID','OSR']])
-    # add mean OSR of "perceived neighborhood" for each building
-    gdf['OSR_ND'] = momepy.AverageCharacter(tessellation, values='OSR', spatial_weights=sw, unique_id='uID').mean
-    gdf['OSR_ND'] = round(gdf['OSR_ND'],2)
     gdf.rename(columns={'building:levels': 'floors', 'area': 'footprint'},inplace=True)
     #gdf_out = gdf.to_crs(4326)
     return gdf
@@ -296,9 +307,9 @@ with st.expander("Density nomograms", expanded=True):
     save_me.to_csv(csv_buffer)
     s3_resource = boto3.resource('s3')
     try:
-        s3_resource.Object(bucket, f'ndp1/D1_{add}.csv').load()
+        s3_resource.Object(bucket, f'ndp1/D1_v1_{add}.csv').load()
     except ClientError as e:
-        s3_resource.Object(bucket, f'ndp1/D1_{add}.csv').put(Body=csv_buffer.getvalue())
+        s3_resource.Object(bucket, f'ndp1/D1_v1_{add}.csv').put(Body=csv_buffer.getvalue())
 
 
 # expl container
@@ -317,7 +328,8 @@ with st.expander("What is this?", expanded=False):
     **FSI** = Floor Space Index = FAR = Floor Area Ratio = Ratio of floor area per total area of _morphological plot_<br>
     **GSI** = Ground Space Index = Coverage = Ratio of building footprint per total area of _morphological plot_<br>
     **OSR** = Open Space Ratio = Ratio of non-build space per square meter of gross floor area<br>
-    **OSR_ND** = Average OSR of plots in nearby neighborhood<br>
+    **i_ND** = Value of the _i_-index in neighborhood scale<br>
+    **OSR_ND_mean** = Average OSR of plots in nearby neighborhood<br>
     
     Density classification is based on OSR-values:<br>
     <i>
@@ -358,7 +370,7 @@ with st.expander("What is this?", expanded=False):
 
 footer_title = '''
 ---
-:see_no_evil: **Naked Density Project**
+**Naked Density Project**
 [![MIT license](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/teemuja) 
 '''
 st.markdown(footer_title)
