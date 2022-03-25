@@ -5,6 +5,8 @@ import numpy as np
 import streamlit as st
 import osmnx as ox
 import momepy
+import shapely.speedups
+shapely.speedups.enable()
 import plotly.express as px
 px.set_mapbox_access_token(st.secrets['MAPBOX_TOKEN'])
 my_style = st.secrets['MAPBOX_STYLE']
@@ -50,7 +52,7 @@ st.markdown("###")
 st.title(':point_down:')
 
 @st.cache(allow_output_mutation=True)
-def get_data(add, tags, radius=1000):
+def get_data(add, tags, radius=500):
     gdf = ox.geometries_from_address(add, tags, radius)
     fp_proj = ox.project_gdf(gdf).reset_index()
     fp_proj = fp_proj[fp_proj["element_type"] == "way"]
@@ -79,7 +81,7 @@ user_input = st.text_input('Type address or place on earth')
 import re
 add = re.sub(' +', ' ', f'{user_input}')
 tags = {'building': True}
-radius = 900
+radius = 500
 if add:
     try:
         buildings = get_data(add, tags, radius)
@@ -114,7 +116,7 @@ with st.expander("Buildings on map", expanded=True):
                                  mapbox_style=my_style,
                                  color_discrete_sequence=px.colors.qualitative.D3,
                                  center={"lat": lat, "lon": lon},
-                                 zoom=13,
+                                 zoom=14,
                                  opacity=0.8,
                                  width=1200,
                                  height=700
@@ -236,7 +238,7 @@ with st.expander("Density nomograms", expanded=True):
                                       color_discrete_map=colormap_osr
                                       )
     fig_OSR.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
-    fig_OSR.update_xaxes(rangeslider_visible=True)
+    fig_OSR.update_xaxes(rangeslider_visible=False)
 
     #OSR_ND
     fig_OSR_ND = px.scatter(case_data, title='Density nomogram - OSR of neighborhood',
@@ -249,7 +251,7 @@ with st.expander("Density nomograms", expanded=True):
                                       color_discrete_map=colormap_osr
                                       )
     fig_OSR_ND.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
-    fig_OSR_ND.update_xaxes(rangeslider_visible=True)
+    fig_OSR_ND.update_xaxes(rangeslider_visible=False)
 
     # and maps..
     case_data_map = case_data.to_crs(4326)
