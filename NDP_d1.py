@@ -181,13 +181,15 @@ def osm_densities(buildings):
 
 @st.cache(allow_output_mutation=True)
 def classify_density(density_data):
-    density_data['OSR_class'] = 'close'
+    density_data['OSR_class'] = 'nan'
+    density_data.loc[density_data['OSR'] > 0, 'OSR_class'] = 'close'
     density_data.loc[density_data['OSR'] > 1, 'OSR_class'] = 'dense'
     density_data.loc[density_data['OSR'] > 2, 'OSR_class'] = 'compact'
     density_data.loc[density_data['OSR'] > 4, 'OSR_class'] = 'spacious'
     density_data.loc[density_data['OSR'] > 8, 'OSR_class'] = 'airy'
     density_data.loc[density_data['OSR'] > 16, 'OSR_class'] = 'spread'
-    density_data['OSR_ND_class'] = 'close'
+    density_data['OSR_ND_class'] = 'nan'
+    density_data.loc[density_data['OSR_ND'] > 0, 'OSR_ND_class'] = 'close'
     density_data.loc[density_data['OSR_ND'] > 1, 'OSR_ND_class'] = 'dense'
     density_data.loc[density_data['OSR_ND'] > 2, 'OSR_ND_class'] = 'compact'
     density_data.loc[density_data['OSR_ND'] > 4, 'OSR_ND_class'] = 'spacious'
@@ -201,7 +203,8 @@ colormap_osr = {
     "compact": "darkolivegreen",
     "spacious": "lightgreen",
     "airy": "cornflowerblue",
-    "spread": "lightblue"
+    "spread": "lightblue",
+    "nan":"grey"
 }
 # CALCULATE DENSITIES ----------------------------------
 
@@ -253,49 +256,20 @@ with st.expander("Density nomograms", expanded=True):
     fig_OSR_ND.update_layout(xaxis_range=[0, 0.5], yaxis_range=[0, 3])
     fig_OSR_ND.update_xaxes(rangeslider_visible=False)
 
-    # and maps..
-    case_data_map = case_data.to_crs(4326)
-    map_OSR = px.choropleth(case_data_map,
-                            title='Density structure - OSR',
-                            geojson=case_data_map.geometry,
-                            locations=case_data_map.index,
-                            color="OSR_class",
-                            labels={"OSR_class": 'Plot OSR'},
-                            hover_name='building',
-                            hover_data=['floors', 'GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                            color_discrete_map=colormap_osr,
-                            category_orders={'OSR_class': ['close','dense','compact','spacious','airy','spread']},
-                            projection="mercator")
-    map_OSR.update_geos(fitbounds="locations", visible=False)
-    map_OSR.update_layout(showlegend=True) #margin={"r":0,"t":0,"l":0,"b":0},
-
-    map_OSR_ND = px.choropleth(case_data_map,
-                            title='Density structure - OSR_ND',
-                            geojson=case_data_map.geometry,
-                            locations=case_data_map.index,
-                            color="OSR_ND_class",
-                            labels={"OSR_ND_class": 'Neighborhood OSR'},
-                            hover_name='building',
-                            hover_data=['floors', 'GFA', 'FSI', 'GSI', 'OSR', 'OSR_ND'],
-                            color_discrete_map=colormap_osr,
-                            category_orders={'OSR_ND_class': ['close','dense','compact','spacious','airy','spread']},
-                            projection="mercator")
-    map_OSR_ND.update_geos(fitbounds="locations", visible=False)
-    map_OSR_ND.update_layout(showlegend=True)
-
     # charts..
     col1, col2 = st.columns(2)
     col1.plotly_chart(fig_OSR, use_container_width=True)
-    col1.plotly_chart(map_OSR, use_container_width=True)
     col2.plotly_chart(fig_OSR_ND, use_container_width=True)
-    col2.plotly_chart(map_OSR_ND, use_container_width=True)
 
     # prepare save..
     density_data.insert(0, 'TimeStamp', pd.to_datetime('now').replace(microsecond=0))
     density_data['date'] = density_data['TimeStamp'].dt.date
     save_me = density_data.drop(columns=(['uID', 'TimeStamp','OSR_class','OSR_ND_class'])).assign(location=add).fillna(0)
     save_me = save_me.assign(flr_rate=flr_rate)
-
+    # describe_table
+    st.markdown(f'{add} data described')
+    des = case_data.drop(columns=['osmid', 'uID', 'ND_mean_floors']).describe()
+    st.dataframe(des)
     # save button -----------------------------------------------------------------------
     raks = save_me.to_csv().encode('utf-8')
     save = st.download_button(label="Save density data as CSV", data=raks, file_name=f'buildings_{add}.csv',mime='text/csv')
@@ -319,10 +293,6 @@ with st.expander("What is this?", expanded=False):
     st.markdown('Density measures in the nomogram above are derived from the latest density research by'
                 ' Meta Berghouser Pont and Per Haupt (2021), Kim Dowey and Elek Pafka (2014) as well as'
                 ' from Finnish seminal work by O-I Meurman in 1947.')
-    # describe_table
-    st.markdown(f'{add} data described')
-    des = case_data.drop(columns=['osmid','uID','ND_mean_floors']).describe()
-    st.dataframe(des)
     # expl
     selite = '''
     **Density measures**<br>
