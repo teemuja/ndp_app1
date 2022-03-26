@@ -122,12 +122,11 @@ with st.expander("Buildings on map", expanded=True):
                                  height=700
                                  )
     st.plotly_chart(mymap, use_container_width=True)
-    flr_rate = round((buildings['building:levels'].isna().sum() / len(buildings.index)) * 100,0)
+    flr_rate = round(buildings['building:levels'].isna().sum() / len(buildings.index) * 100,0)
     st.caption(f'Floor number information in {flr_rate}% of buildings. The rest will be estimated using nearby averages.')
 
 # -------------------------------------------------------------------
 
-# @st.experimental_memo #https://docs.streamlit.io/library/api-reference/performance/st.experimental_memo
 #@st.cache(allow_output_mutation=True)
 def osm_densities(buildings):
     # projected crs for momepy calculations
@@ -149,9 +148,9 @@ def osm_densities(buildings):
     gdf['ND_mean_floors'].fillna(1, inplace=True)
     # prepare GFAs
     if gdf["building:levels"] is not None:
-        gdf["GFA"] = gdf["area"] * gdf["building:levels"]
-    else:
         gdf["GFA"] = gdf["area"] * gdf['ND_mean_floors']
+    else:
+        gdf["GFA"] = gdf["area"] * gdf["building:levels"]
     gdf['GFA'] = round(gdf['GFA'],0)
     # calculate FSI = floor space index = FAR = floor area ratio
     gdf['FSI'] = round(gdf['GFA'] / momepy.Area(tessellation).series,3)
@@ -283,9 +282,9 @@ with st.expander("Density nomograms", expanded=True):
     save_me.to_csv(csv_buffer)
     s3_resource = boto3.resource('s3')
     try:
-        s3_resource.Object(bucket, f'ndp1/D1_v1_{add}.csv').load()
+        s3_resource.Object(bucket, f'ndp1/D1_v2_{add}.csv').load()
     except ClientError as e:
-        s3_resource.Object(bucket, f'ndp1/D1_v1_{add}.csv').put(Body=csv_buffer.getvalue())
+        s3_resource.Object(bucket, f'ndp1/D1_v2_{add}.csv').put(Body=csv_buffer.getvalue())
 
 
 # expl container
